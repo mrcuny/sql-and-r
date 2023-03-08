@@ -1,0 +1,211 @@
+---
+title: "SQL and R"
+author: "Mohammed Rahman"
+date: "2023-03-06"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Overview
+
+This assignment involves choosing six recent popular movies and asking at least 
+five people to rate each movie on a scale of 1 to 5. 
+The results should be stored in a SQL database of your choosing and then loaded 
+into an R dataframe. 
+
+The assignment also requires demonstrating a reasonable approach for handling 
+missing data. 
+There are optional ways to make the solution better, such as using survey 
+software, standardizing ratings, or creating normalized tables.
+
+## Choose six recent popular movies
+
+Here are the ones I chose:
+
+1. Die Hart the Movie
+2. We Have a Ghost
+3. The Strays
+4. Gladbeck: The Hostage Crisis
+5. Kranti
+6. The Womb
+
+## Choose an SQL database
+
+I will work with the sqlite database.
+
+### Create the database
+
+```{r}
+library(DBI)
+library(RSQLite)
+
+con <- dbConnect(RSQLite::SQLite(), "movie_ratings.db")
+```
+
+### Create table for movies
+
+```{r}
+dbExecute(con, "CREATE TABLE IF NOT EXISTS movies
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  title TEXT)")
+```
+
+### Create table for ratings
+
+```{r}
+dbExecute(con, "CREATE TABLE IF NOT EXISTS ratings
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  movie_id INTEGER,
+                  person TEXT,
+                  rating INTEGER,
+                  FOREIGN KEY(movie_id) REFERENCES movies(id))")
+```
+
+## Store data
+
+We will use SQL `insert into` statements to store data in the database.
+
+### Movies
+
+```{sql, connection=con}
+-- Insert movies into the database
+INSERT INTO movies (title) VALUES 
+('Die Hart the Movie'),
+('We Have a Ghost'),
+('The Strays'),
+('Gladbeck: The Hostage Crisis'),
+('Kranti'),
+('The Womb');
+```
+
+This is how the `movies` table looks:
+
+```{r}
+movies <- dbReadTable(con, "movies")
+movies
+```
+
+
+### Ratings
+
+```{sql, connection=con}
+-- Insert ratings into the database
+INSERT INTO ratings (movie_id, person, rating) VALUES 
+-- Die Hart the Movie
+(1, 'Alice', 4), (1, 'Bob', 5), (1, 'Charlie', NULL), (1, 'David', 4), (1, 'Emma', 2), 
+(1, 'Frank', 4), (1, 'Grace', 5), (1, 'Henry', 3), (1, 'Isabella', 4), (1, 'Jacob', 2), 
+-- We Have a Ghost
+(2, 'Alice', 3), (2, 'Bob', 4), (2, 'Charlie', 3), (2, 'David', NULL), (2, 'Emma', 2), 
+(2, 'Frank', 3), (2, 'Grace', 4), (2, 'Henry', 3), (2, 'Isabella', 4), (2, 'Jacob', 2), 
+-- The Strays
+(3, 'Alice', 2), (3, 'Bob', 3), (3, 'Charlie', 2), (3, 'David', 3), (3, 'Emma', 1), 
+(3, 'Frank', 2), (3, 'Grace', 3), (3, 'Henry', 2), (3, 'Isabella', 3), (3, 'Jacob', 1), 
+-- Gladbeck: The Hostage Crisis
+(4, 'Alice', 3), (4, 'Bob', NULL), (4, 'Charlie', 4), (4, 'David', 3), (4, 'Emma', 5), 
+(4, 'Frank', 3), (4, 'Grace', 2), (4, 'Henry', 4), (4, 'Isabella', 3), (4, 'Jacob', 5), 
+-- Kranti
+(5, 'Alice', 4), (5, 'Bob', 3), (5, 'Charlie', 4), (5, 'David', 4), (5, 'Emma', 2), 
+(5, 'Frank', NULL), (5, 'Grace', 3), (5, 'Henry', 4), (5, 'Isabella', 3), (5, 'Jacob', 2), 
+-- The Womb
+(6, 'Alice', 5), (6, 'Bob', 4), (6, 'Charlie', 3), (6, 'David', 5), (6, 'Emma', 2), 
+(6, 'Frank', 5), (6, 'Grace', 4), (6, 'Henry', 3), (6, 'Isabella', 5), (6, 'Jacob', NULL);
+```
+
+Take a look at the first 10 rows:
+```{r}
+ratings <- dbReadTable(con, "ratings")
+head(ratings, 10)
+```
+
+## Load the data to R
+
+Since we need both tables to be read into a single dataframe in R, we'll use 
+the `dbGetQuery` function to execute an SQL query that joins the two tables on 
+the `movie_id` column.
+
+```{r}
+movie_ratings <- dbGetQuery(con, "
+  SELECT m.title, r.person, r.rating
+  FROM movies m
+  JOIN ratings r ON m.id = r.movie_id
+")
+```
+
+Let's view the first 10 rows of `movie_ratings`:
+
+```{r}
+head(movie_ratings, 10)
+```
+
+## Handling missing data
+
+It's very unlikely that all ten friends have seen all six movies, so ideally we 
+can expect some missing data in our ratings data.
+
+We can easily check if there are any missing values:
+
+```{r}
+anyNA(movie_ratings)
+```
+
+Yes, we have some missing values.
+
+I chose to use the mean imputation approach to fill in missing ratings.
+
+```{r}
+# Use mean imputation to fill in missing ratings
+movie_ratings$rating[is.na(movie_ratings$rating)] <- 
+  mean(movie_ratings$rating, na.rm = TRUE)
+```
+
+This approach involves replacing missing values with the mean value of the 
+non-missing values for that variable.
+
+It is a simple and effective approach, which assumes that the missing data is 
+missing at random.
+
+We can now see there are no more missing values:
+
+```{r}
+anyNA(movie_ratings)
+```
+
+## Standardizing ratings
+
+There can be benefits to standardizing ratings, particularly when comparing 
+ratings across multiple movies or between different raters. 
+Standardizing ratings can help to eliminate the effects of differences in 
+rating scales or individual rater biases, making it easier to compare and 
+analyze ratings data.
+
+One common approach to standardizing ratings is to convert them to z-scores, 
+which represent the number of standard deviations from the mean rating for a 
+particular movie. This approach assumes that the ratings data follows a normal 
+distribution, and can be useful for comparing ratings across different movies 
+or between different raters.
+
+```{r}
+# Calculate z-scores for each rating within each movie
+movie_ratings$zscore <- ave(
+  movie_ratings$rating, 
+  movie_ratings$title, 
+  FUN = function(x) (x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE)
+)
+```
+
+Look at the first 10 observations:
+
+```{r}
+head(movie_ratings, 10)
+```
+
+## Conclusions
+
+Overall, this task demonstrates the power of combining SQL and R for storing, manipulating, and analyzing complex data sets, such as movie ratings data.
+
+In this assignment, we used SQL to create two tables (movies and ratings) in a SQLite database and insert data into them. We then used R to read the data from the database, join the two tables into a single data frame, handle missing data, and standardize the ratings data using z-scores.
+
+By standardizing the ratings data, we can compare and analyze the ratings across multiple movies and between different raters, even if they are using different rating scales or have different rating biases. This can be useful for a variety of applications, such as identifying the most highly rated movies or finding patterns in the way different raters rate movies.
