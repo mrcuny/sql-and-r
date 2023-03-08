@@ -1,1 +1,1 @@
-# sql-and-r
+# Assignment: SQL and R
